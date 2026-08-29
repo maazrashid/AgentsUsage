@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -24,16 +23,24 @@ type codexState struct {
 }
 
 func parseCodexFile(ctx context.Context, path string) ([]Event, Diagnostics) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, Diagnostics{ParseErrors: 1, Warnings: []string{"A Codex usage file could not be read."}}
-	}
-	defer file.Close()
-
 	state := codexState{signatures: make(map[string]string)}
+	events, _, _, diagnostics, _, err := parseCodexTail(ctx, path, streamCursor{}, state)
+	diagnostics.FilesScanned = 1
+	if err != nil && err != context.Canceled {
+		diagnostics.ParseErrors++
+		diagnostics.Warnings = append(diagnostics.Warnings, "A Codex usage file could not be read.")
+	}
+	return events, diagnostics
+}
+
+func parseCodexTail(ctx context.Context, path string, cursor streamCursor, original codexState) ([]Event, streamCursor, codexState, Diagnostics, int64, error) {
+	state := cloneCodexState(original)
+	if state.signatures == nil {
+		state.signatures = make(map[string]string)
+	}
 	var events []Event
-	diagnostics := Diagnostics{FilesScanned: 1}
-	err = scanLines(ctx, file, func(line []byte) {
+	var diagnostics Diagnostics
+	scan, err := scanJSONLTail(ctx, path, cursor, func(line []byte) {
 		entry, ok := decodeObject(line)
 		if !ok {
 			diagnostics.ParseErrors++
@@ -60,11 +67,21 @@ func parseCodexFile(ctx context.Context, path string) ([]Event, Diagnostics) {
 			diagnostics.RecordsParsed++
 		}
 	})
-	if err != nil && err != context.Canceled {
-		diagnostics.ParseErrors++
-		diagnostics.Warnings = append(diagnostics.Warnings, "A Codex usage file could not be scanned.")
+	diagnostics.ParseErrors += scan.oversizedLines
+	return events, scan.cursor, state, diagnostics, scan.bytesRead, err
+}
+
+func cloneCodexState(original codexState) codexState {
+	cloned := original
+	if original.highWater != nil {
+		highWater := *original.highWater
+		cloned.highWater = &highWater
 	}
-	return events, diagnostics
+	cloned.signatures = make(map[string]string, len(original.signatures))
+	for source, signature := range original.signatures {
+		cloned.signatures[source] = signature
+	}
+	return cloned
 }
 
 func parseCodexTokenCount(entry, payload map[string]any, state *codexState) (Event, bool) {

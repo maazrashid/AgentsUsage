@@ -12,7 +12,7 @@ This repository is under active development. The first runnable milestone includ
 - JSON configuration with cross-platform home-directory expansion.
 - A native system tray menu with live usage status, dashboard/settings shortcuts, manual refresh, and Start/Stop controls.
 
-Append-tail parsing for changed active logs and release packaging are the next implementation phase.
+Active JSONL files are indexed incrementally: unchanged files are not reopened, appended bytes are parsed from the previous cursor, and incomplete final records are carried into the next refresh. Truncated, replaced, and deleted files rebuild or leave the index cleanly.
 
 ## Run locally
 
@@ -75,6 +75,20 @@ go test ./...
 go test -race ./... # where a race-enabled CGO toolchain is available
 go build -trimpath -ldflags="-s -w" -o AgentsUsage ./cmd/agentsusage
 ```
+
+The repository also includes a `Makefile` and a PowerShell release builder:
+
+```bash
+make check
+make build
+```
+
+```powershell
+./scripts/build-release.ps1 -Target current
+./scripts/build-release.ps1 -Target all
+```
+
+The release builder writes stripped Windows amd64, Linux amd64, macOS amd64, and macOS arm64 archives plus `SHA256SUMS` under `dist/`. Pushing a `v*` tag runs the same target matrix in GitHub Actions and publishes the archives to a GitHub release; a manual workflow run builds downloadable artifacts without creating a release.
 
 For a Windows GUI build without a console window:
 

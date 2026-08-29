@@ -1,12 +1,9 @@
 package parser
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"time"
 )
 
@@ -38,72 +35,79 @@ type claudeRecord struct {
 }
 
 func parseClaudeFile(ctx context.Context, path string) ([]claudeCandidate, Diagnostics) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, Diagnostics{ParseErrors: 1, Warnings: []string{"A Claude usage file could not be read."}}
-	}
-	defer file.Close()
-
-	var result []claudeCandidate
-	diagnostics := Diagnostics{FilesScanned: 1}
-	err = scanLines(ctx, file, func(line []byte) {
-		var raw claudeRecord
-		if err := json.Unmarshal(line, &raw); err != nil {
-			diagnostics.ParseErrors++
-			return
-		}
-		if raw.Message.Usage.Input == nil || raw.Message.Usage.Output == nil {
-			diagnostics.RecordsSkipped++
-			return
-		}
-		if raw.IsAPIErrorMessage || raw.Message.Model == "" || raw.Message.Model == "<synthetic>" {
-			diagnostics.RecordsSkipped++
-			return
-		}
-		timestamp, err := time.Parse(time.RFC3339Nano, raw.Timestamp)
-		if err != nil {
-			diagnostics.RecordsSkipped++
-			return
-		}
-		cacheWrite := max64(nonNegative(raw.Message.Usage.CacheWrite),
-			nonNegative(raw.Message.Usage.CacheCreation.OneHour)+nonNegative(raw.Message.Usage.CacheCreation.FiveMin))
-		event := Event{
-			Provider:      ProviderClaude,
-			Timestamp:     timestamp,
-			Model:         normalizedLabel(raw.Message.Model),
-			InputTokens:   nonNegative(*raw.Message.Usage.Input),
-			OutputTokens:  nonNegative(*raw.Message.Usage.Output),
-			CacheRead:     nonNegative(raw.Message.Usage.CacheRead),
-			CacheWrite:    cacheWrite,
-			CostEstimated: true,
-		}
-		if raw.CostUSD != nil && *raw.CostUSD >= 0 {
-			event.CostUSD = *raw.CostUSD
-			event.PricingMatched = true
-		} else {
-			event.CostUSD, event.PricingMatched = priceClaude(
-				event.Model,
-				event.InputTokens,
-				event.OutputTokens,
-				event.CacheRead,
-				event.CacheWrite,
-				nonNegative(raw.Message.Usage.CacheCreation.OneHour),
-			)
-		}
-		if event.ProcessedTokens() == 0 {
-			diagnostics.RecordsSkipped++
-			return
-		}
-		result = append(result, claudeCandidate{
-			event: event, messageID: identityString(raw.Message.ID), requestID: identityString(raw.RequestID),
-		})
-		diagnostics.RecordsParsed++
-	})
+	result, _, diagnostics, _, err := parseClaudeTail(ctx, path, streamCursor{})
+	diagnostics.FilesScanned = 1
 	if err != nil && err != context.Canceled {
 		diagnostics.ParseErrors++
-		diagnostics.Warnings = append(diagnostics.Warnings, "A Claude usage file could not be scanned.")
+		diagnostics.Warnings = append(diagnostics.Warnings, "A Claude usage file could not be read.")
 	}
 	return result, diagnostics
+}
+
+func parseClaudeTail(ctx context.Context, path string, cursor streamCursor) ([]claudeCandidate, streamCursor, Diagnostics, int64, error) {
+	var result []claudeCandidate
+	var diagnostics Diagnostics
+	scan, err := scanJSONLTail(ctx, path, cursor, func(line []byte) {
+		candidate, outcome := parseClaudeLine(line)
+		switch outcome {
+		case lineParsed:
+			result = append(result, candidate)
+			diagnostics.RecordsParsed++
+		case lineSkipped:
+			diagnostics.RecordsSkipped++
+		case lineInvalid:
+			diagnostics.ParseErrors++
+		}
+	})
+	diagnostics.ParseErrors += scan.oversizedLines
+	return result, scan.cursor, diagnostics, scan.bytesRead, err
+}
+
+type lineOutcome uint8
+
+const (
+	lineInvalid lineOutcome = iota
+	lineSkipped
+	lineParsed
+)
+
+func parseClaudeLine(line []byte) (claudeCandidate, lineOutcome) {
+	var raw claudeRecord
+	if err := json.Unmarshal(line, &raw); err != nil {
+		return claudeCandidate{}, lineInvalid
+	}
+	if raw.Message.Usage.Input == nil || raw.Message.Usage.Output == nil {
+		return claudeCandidate{}, lineSkipped
+	}
+	if raw.IsAPIErrorMessage || raw.Message.Model == "" || raw.Message.Model == "<synthetic>" {
+		return claudeCandidate{}, lineSkipped
+	}
+	timestamp, err := time.Parse(time.RFC3339Nano, raw.Timestamp)
+	if err != nil {
+		return claudeCandidate{}, lineSkipped
+	}
+	cacheWrite := max64(nonNegative(raw.Message.Usage.CacheWrite),
+		nonNegative(raw.Message.Usage.CacheCreation.OneHour)+nonNegative(raw.Message.Usage.CacheCreation.FiveMin))
+	event := Event{
+		Provider: ProviderClaude, Timestamp: timestamp, Model: normalizedLabel(raw.Message.Model),
+		InputTokens: nonNegative(*raw.Message.Usage.Input), OutputTokens: nonNegative(*raw.Message.Usage.Output),
+		CacheRead: nonNegative(raw.Message.Usage.CacheRead), CacheWrite: cacheWrite, CostEstimated: true,
+	}
+	if raw.CostUSD != nil && *raw.CostUSD >= 0 {
+		event.CostUSD = *raw.CostUSD
+		event.PricingMatched = true
+	} else {
+		event.CostUSD, event.PricingMatched = priceClaude(
+			event.Model, event.InputTokens, event.OutputTokens, event.CacheRead, event.CacheWrite,
+			nonNegative(raw.Message.Usage.CacheCreation.OneHour),
+		)
+	}
+	if event.ProcessedTokens() == 0 {
+		return claudeCandidate{}, lineSkipped
+	}
+	return claudeCandidate{
+		event: event, messageID: identityString(raw.Message.ID), requestID: identityString(raw.RequestID),
+	}, lineParsed
 }
 
 func dedupeClaude(candidates []claudeCandidate) []Event {
@@ -153,24 +157,6 @@ func dedupeClaude(candidates []claudeCandidate) []Event {
 		}
 	}
 	return result
-}
-
-func scanLines(ctx context.Context, reader io.Reader, visit func([]byte)) error {
-	scanner := bufio.NewScanner(reader)
-	buffer := make([]byte, 64*1024)
-	scanner.Buffer(buffer, 16*1024*1024)
-	for scanner.Scan() {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		line := scanner.Bytes()
-		if len(line) > 0 {
-			visit(line)
-		}
-	}
-	return scanner.Err()
 }
 
 func identityString(value any) string {

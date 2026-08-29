@@ -15,12 +15,17 @@ type fileStamp struct {
 
 type claudeCacheEntry struct {
 	stamp       fileStamp
+	info        os.FileInfo
+	cursor      streamCursor
 	candidates  []claudeCandidate
 	diagnostics Diagnostics
 }
 
 type codexCacheEntry struct {
 	stamp       fileStamp
+	info        os.FileInfo
+	cursor      streamCursor
+	state       codexState
 	events      []Event
 	diagnostics Diagnostics
 }
@@ -53,7 +58,7 @@ func (i *Indexer) Refresh(ctx context.Context) (Stats, error) {
 	if err != nil {
 		refreshErrors = append(refreshErrors, errors.New("Claude log discovery failed"))
 	}
-	i.refreshClaude(ctx, claudeFiles, &refreshErrors)
+	bytesRead := i.refreshClaude(ctx, claudeFiles, &refreshErrors)
 
 	var codexFiles []string
 	for _, root := range codexRoots(i.options.CodexRoot) {
@@ -64,7 +69,7 @@ func (i *Indexer) Refresh(ctx context.Context) (Stats, error) {
 		}
 		codexFiles = append(codexFiles, files...)
 	}
-	i.refreshCodex(ctx, codexFiles, &refreshErrors)
+	bytesRead += i.refreshCodex(ctx, codexFiles, &refreshErrors)
 	if err := ctx.Err(); err != nil {
 		return Stats{}, err
 	}
@@ -84,6 +89,7 @@ func (i *Indexer) Refresh(ctx context.Context) (Stats, error) {
 		mergeDiagnostics(&diagnostics, cached.diagnostics)
 	}
 	stats := aggregate(events, now())
+	diagnostics.BytesRead = bytesRead
 	stats.Diagnostics = diagnostics
 	return stats, errors.Join(refreshErrors...)
 }
@@ -106,54 +112,132 @@ func sortedCodexCacheKeys(cache map[string]codexCacheEntry) []string {
 	return keys
 }
 
-func (i *Indexer) refreshClaude(ctx context.Context, files []string, refreshErrors *[]error) {
+func (i *Indexer) refreshClaude(ctx context.Context, files []string, refreshErrors *[]error) int64 {
 	seen := make(map[string]struct{}, len(files))
+	var bytesRead int64
 	for _, path := range files {
 		seen[path] = struct{}{}
-		stamp, err := statStamp(path)
+		info, err := os.Stat(path)
 		if err != nil {
 			*refreshErrors = append(*refreshErrors, errors.New("A Claude usage file changed during refresh"))
 			continue
 		}
-		if cached, ok := i.claude[path]; ok && cached.stamp == stamp {
+		stamp := stampFromInfo(info)
+		cached, exists := i.claude[path]
+		sameFile := exists && cached.info != nil && os.SameFile(cached.info, info)
+		if sameFile && cached.stamp == stamp && cached.cursor.offset == info.Size() {
 			continue
 		}
-		parsed, diagnostics := parseClaudeFile(ctx, path)
-		i.claude[path] = claudeCacheEntry{stamp: stamp, candidates: parsed, diagnostics: diagnostics}
+
+		var parsed []claudeCandidate
+		var cursor streamCursor
+		var diagnostics Diagnostics
+		var read int64
+		appendSafe := false
+		if sameFile && info.Size() > cached.cursor.offset {
+			appendSafe, err = cursorMatchesFile(path, cached.cursor)
+			if err != nil {
+				*refreshErrors = append(*refreshErrors, errors.New("A Claude usage file changed during refresh"))
+				continue
+			}
+		}
+		if appendSafe {
+			var delta Diagnostics
+			parsed, cursor, delta, read, err = parseClaudeTail(ctx, path, cached.cursor)
+			diagnostics = cached.diagnostics
+			mergeDiagnostics(&diagnostics, delta)
+			parsed = append(cached.candidates, parsed...)
+		} else {
+			parsed, cursor, diagnostics, read, err = parseClaudeTail(ctx, path, streamCursor{})
+			diagnostics.FilesScanned = 1
+		}
+		bytesRead += read
+		if err != nil {
+			*refreshErrors = append(*refreshErrors, errors.New("A Claude usage file could not be refreshed"))
+			continue
+		}
+		postInfo, statErr := os.Stat(path)
+		if statErr != nil || !os.SameFile(info, postInfo) || postInfo.Size() < cursor.offset {
+			*refreshErrors = append(*refreshErrors, errors.New("A Claude usage file changed during refresh"))
+			continue
+		}
+		i.claude[path] = claudeCacheEntry{
+			stamp: stampFromInfo(postInfo), info: postInfo, cursor: cursor,
+			candidates: parsed, diagnostics: diagnostics,
+		}
 	}
 	for path := range i.claude {
 		if _, ok := seen[path]; !ok {
 			delete(i.claude, path)
 		}
 	}
+	return bytesRead
 }
 
-func (i *Indexer) refreshCodex(ctx context.Context, files []string, refreshErrors *[]error) {
+func (i *Indexer) refreshCodex(ctx context.Context, files []string, refreshErrors *[]error) int64 {
 	seen := make(map[string]struct{}, len(files))
+	var bytesRead int64
 	for _, path := range files {
 		seen[path] = struct{}{}
-		stamp, err := statStamp(path)
+		info, err := os.Stat(path)
 		if err != nil {
 			*refreshErrors = append(*refreshErrors, errors.New("A Codex usage file changed during refresh"))
 			continue
 		}
-		if cached, ok := i.codex[path]; ok && cached.stamp == stamp {
+		stamp := stampFromInfo(info)
+		cached, exists := i.codex[path]
+		sameFile := exists && cached.info != nil && os.SameFile(cached.info, info)
+		if sameFile && cached.stamp == stamp && cached.cursor.offset == info.Size() {
 			continue
 		}
-		parsed, diagnostics := parseCodexFile(ctx, path)
-		i.codex[path] = codexCacheEntry{stamp: stamp, events: parsed, diagnostics: diagnostics}
+
+		var events []Event
+		var cursor streamCursor
+		var state codexState
+		var diagnostics Diagnostics
+		var read int64
+		appendSafe := false
+		if sameFile && info.Size() > cached.cursor.offset {
+			appendSafe, err = cursorMatchesFile(path, cached.cursor)
+			if err != nil {
+				*refreshErrors = append(*refreshErrors, errors.New("A Codex usage file changed during refresh"))
+				continue
+			}
+		}
+		if appendSafe {
+			var delta Diagnostics
+			events, cursor, state, delta, read, err = parseCodexTail(ctx, path, cached.cursor, cached.state)
+			diagnostics = cached.diagnostics
+			mergeDiagnostics(&diagnostics, delta)
+			events = append(cached.events, events...)
+		} else {
+			initial := codexState{signatures: make(map[string]string)}
+			events, cursor, state, diagnostics, read, err = parseCodexTail(ctx, path, streamCursor{}, initial)
+			diagnostics.FilesScanned = 1
+		}
+		bytesRead += read
+		if err != nil {
+			*refreshErrors = append(*refreshErrors, errors.New("A Codex usage file could not be refreshed"))
+			continue
+		}
+		postInfo, statErr := os.Stat(path)
+		if statErr != nil || !os.SameFile(info, postInfo) || postInfo.Size() < cursor.offset {
+			*refreshErrors = append(*refreshErrors, errors.New("A Codex usage file changed during refresh"))
+			continue
+		}
+		i.codex[path] = codexCacheEntry{
+			stamp: stampFromInfo(postInfo), info: postInfo, cursor: cursor, state: state,
+			events: events, diagnostics: diagnostics,
+		}
 	}
 	for path := range i.codex {
 		if _, ok := seen[path]; !ok {
 			delete(i.codex, path)
 		}
 	}
+	return bytesRead
 }
 
-func statStamp(path string) (fileStamp, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fileStamp{}, err
-	}
-	return fileStamp{size: info.Size(), modTime: info.ModTime().UnixNano()}, nil
+func stampFromInfo(info os.FileInfo) fileStamp {
+	return fileStamp{size: info.Size(), modTime: info.ModTime().UnixNano()}
 }

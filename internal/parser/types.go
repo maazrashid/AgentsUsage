@@ -51,6 +51,7 @@ type Diagnostics struct {
 	RecordsParsed  int      `json:"recordsParsed"`
 	RecordsSkipped int      `json:"recordsSkipped"`
 	ParseErrors    int      `json:"parseErrors"`
+	BytesRead      int64    `json:"bytesReadThisRefresh"`
 	Warnings       []string `json:"warnings,omitempty"`
 }
 
