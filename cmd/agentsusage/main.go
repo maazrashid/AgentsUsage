@@ -12,7 +12,8 @@ import (
 
 	"github.com/maazrashid/AgentsUsage/internal/config"
 	"github.com/maazrashid/AgentsUsage/internal/parser"
-	"github.com/maazrashid/AgentsUsage/internal/server"
+	"github.com/maazrashid/AgentsUsage/internal/service"
+	trayui "github.com/maazrashid/AgentsUsage/internal/tray"
 )
 
 func main() {
@@ -29,14 +30,16 @@ func run() error {
 	}
 	configPath := flag.String("config", defaultConfig, "path to config.json")
 	forceStart := flag.Bool("start", false, "start the server even when server.autoStart is false")
+	noTray := flag.Bool("no-tray", false, "run as a headless server without a system tray icon")
 	flag.Parse()
 
-	cfg, err := config.Load(*configPath)
+	resolvedConfigPath, err := config.ExpandPath(*configPath)
+	if err != nil {
+		return fmt.Errorf("resolve config path: %w", err)
+	}
+	cfg, err := config.Load(resolvedConfigPath)
 	if err != nil {
 		return err
-	}
-	if !cfg.Server.AutoStart && !*forceStart {
-		return fmt.Errorf("server auto-start is disabled; run with -start or update %s", *configPath)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -52,7 +55,35 @@ func run() error {
 		}
 	}()
 
-	httpServer := server.New(cfg.Server.Address(), monitor)
-	log.Printf("AgentsUsage dashboard: http://localhost:%d", cfg.Server.Port)
-	return httpServer.Run(ctx)
+	controller := service.NewController(cfg.Server.Address(), monitor)
+	defer func() {
+		if err := controller.StopWithTimeout(); err != nil {
+			log.Printf("dashboard server shutdown: %v", err)
+		}
+	}()
+	shouldStart := cfg.Server.AutoStart || *forceStart
+	if shouldStart {
+		if err := controller.Start(); err != nil {
+			if *noTray {
+				return err
+			}
+			log.Printf("dashboard server did not start: %v", err)
+		} else {
+			log.Printf("AgentsUsage dashboard: %s", cfg.Server.DashboardURL())
+		}
+	}
+
+	if *noTray {
+		if !shouldStart {
+			return fmt.Errorf("server auto-start is disabled; run with -start or enable the tray")
+		}
+		<-ctx.Done()
+		return nil
+	}
+
+	return trayui.Run(ctx, trayui.Options{
+		DashboardURL: cfg.Server.DashboardURL(),
+		ConfigPath:   resolvedConfigPath,
+		Quit:         stop,
+	}, controller, monitor)
 }

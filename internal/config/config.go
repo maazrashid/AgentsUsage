@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -152,4 +153,15 @@ func ExpandPath(value string) (string, error) {
 
 func (s ServerConfig) Address() string {
 	return net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
+}
+
+func (s ServerConfig) DashboardURL() string {
+	host := strings.TrimSpace(s.Host)
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "localhost"
+	}
+	return (&url.URL{Scheme: "http", Host: net.JoinHostPort(host, strconv.Itoa(s.Port))}).String()
 }

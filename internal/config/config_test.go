@@ -34,3 +34,17 @@ func TestAddressSupportsIPv6(t *testing.T) {
 		t.Fatalf("address = %q", got)
 	}
 }
+
+func TestDashboardURLUsesLocalhostForWildcardBind(t *testing.T) {
+	server := ServerConfig{Host: "0.0.0.0", Port: 8787}
+	if got := server.DashboardURL(); got != "http://localhost:8787" {
+		t.Fatalf("dashboard URL = %q", got)
+	}
+}
+
+func TestDashboardURLSupportsIPv6(t *testing.T) {
+	server := ServerConfig{Host: "::1", Port: 8787}
+	if got := server.DashboardURL(); got != "http://[::1]:8787" {
+		t.Fatalf("dashboard URL = %q", got)
+	}
+}

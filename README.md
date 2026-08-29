@@ -10,19 +10,20 @@ This repository is under active development. The first runnable milestone includ
 - A recursive `fsnotify` watcher with periodic fallback scans.
 - `GET /api/status`, `GET /api/stats`, and an embedded responsive dashboard.
 - JSON configuration with cross-platform home-directory expansion.
+- A native system tray menu with live usage status, dashboard/settings shortcuts, manual refresh, and Start/Stop controls.
 
-System tray controls and release packaging are the next implementation phase.
+Append-tail parsing for changed active logs and release packaging are the next implementation phase.
 
 ## Run locally
 
-Go 1.22 or newer is required.
+Go 1.25 or newer is required.
 
 ```bash
 go mod download
 go run ./cmd/agentsusage
 ```
 
-Open [http://localhost:8787](http://localhost:8787). By default, the server binds to `0.0.0.0`, so another device on the same trusted network can use `http://<computer-ip>:8787`.
+The tray icon appears after startup. Left-click it to open the dashboard, or use its menu to start and stop the server, refresh usage, open `config.json`, or quit cleanly. You can also open [http://localhost:8787](http://localhost:8787) directly. By default, the server binds to `0.0.0.0`, so another device on the same trusted network can use `http://<computer-ip>:8787`.
 
 The first run creates a config file in the operating system's user config directory:
 
@@ -51,7 +52,15 @@ Use a custom config with:
 go run ./cmd/agentsusage -config /path/to/config.json
 ```
 
-If `server.autoStart` is false, pass `-start` to explicitly launch the standalone service. That setting will be controlled by the tray menu once tray integration lands.
+If `server.autoStart` is false, AgentsUsage opens in the tray with the server stopped. Start it from the tray menu or pass `-start` to override the setting for that launch.
+
+For a headless machine, service manager, or terminal-only session, disable the tray:
+
+```bash
+go run ./cmd/agentsusage -no-tray
+```
+
+Headless mode requires `server.autoStart` or the `-start` flag because there is no tray menu from which to start the server.
 
 ## API
 
@@ -65,6 +74,12 @@ Codex discovery deliberately ignores files outside `sessions` and `archived_sess
 go test ./...
 go test -race ./... # where a race-enabled CGO toolchain is available
 go build -trimpath -ldflags="-s -w" -o AgentsUsage ./cmd/agentsusage
+```
+
+For a Windows GUI build without a console window:
+
+```powershell
+go build -trimpath -ldflags="-s -w -H=windowsgui" -o AgentsUsage.exe ./cmd/agentsusage
 ```
 
 Cost figures are estimates based on token counts and bundled per-model API prices. They are not subscription charges or invoices. Unknown model names remain unpriced rather than being assigned a guessed rate.
