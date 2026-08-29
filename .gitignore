@@ -1,0 +1,12 @@
+# Local build outputs
+/AgentsUsage
+/AgentsUsage.exe
+/dist/
+
+# Go test/build artifacts
+*.test
+*.out
+
+# Editor and OS metadata
+.DS_Store
+Thumbs.db
