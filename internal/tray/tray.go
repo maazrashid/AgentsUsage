@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +37,10 @@ func Run(ctx context.Context, options Options, controller ServerController, usag
 	statusItem.SetDisabled(true)
 	usageItem := menu.Add("Today: loading usage…", func() {})
 	usageItem.SetDisabled(true)
+	claudeQuotaItem := menu.Add("Claude: usage limits unavailable", func() {})
+	claudeQuotaItem.SetDisabled(true)
+	codexQuotaItem := menu.Add("Codex: usage limits unavailable", func() {})
+	codexQuotaItem.SetDisabled(true)
 	menu.AddSeparator()
 	menu.Add("Open Dashboard", func() {
 		if err := OpenURL(options.DashboardURL); err != nil {
@@ -88,7 +93,7 @@ func Run(ctx context.Context, options Options, controller ServerController, usag
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
-			updateMenu(native, statusItem, usageItem, startStopItem, controller.Status(), usage.Snapshot())
+			updateMenu(native, statusItem, usageItem, claudeQuotaItem, codexQuotaItem, startStopItem, controller.Status(), usage.Snapshot())
 			select {
 			case <-ctx.Done():
 				remove()
@@ -113,7 +118,7 @@ func toggleServer(native *systray.SystemTray, controller ServerController) {
 	}
 }
 
-func updateMenu(native *systray.SystemTray, statusItem, usageItem, startStopItem *systray.MenuItem, status service.Status, stats parser.Stats) {
+func updateMenu(native *systray.SystemTray, statusItem, usageItem, claudeQuotaItem, codexQuotaItem, startStopItem *systray.MenuItem, status service.Status, stats parser.Stats) {
 	switch status.State {
 	case service.StateRunning:
 		statusItem.SetLabel("Server: Running · " + status.Address)
@@ -137,7 +142,46 @@ func updateMenu(native *systray.SystemTray, statusItem, usageItem, startStopItem
 		startStopItem.SetDisabled(false)
 	}
 	usageItem.SetLabel(fmt.Sprintf("Today: %s tokens · $%.2f", compactTokens(stats.Today.ProcessedTokens), stats.Today.EstimatedCostUSD))
-	native.SetTooltip(fmt.Sprintf("AgentsUsage · %s tokens today", compactTokens(stats.Today.ProcessedTokens)))
+	claudeQuotaItem.SetLabel(formatQuotaSummary(parser.ProviderClaude, stats.Quotas))
+	codexQuotaItem.SetLabel(formatQuotaSummary(parser.ProviderCodex, stats.Quotas))
+	native.SetTooltip(fmt.Sprintf("AgentsUsage · %s tokens today\n%s\n%s",
+		compactTokens(stats.Today.ProcessedTokens),
+		formatQuotaSummary(parser.ProviderClaude, stats.Quotas),
+		formatQuotaSummary(parser.ProviderCodex, stats.Quotas),
+	))
+}
+
+func formatQuotaSummary(provider parser.Provider, snapshots []parser.QuotaSnapshot) string {
+	name := "Claude"
+	if provider == parser.ProviderCodex {
+		name = "Codex"
+	}
+	for _, snapshot := range snapshots {
+		if snapshot.Provider != provider {
+			continue
+		}
+		parts := make([]string, 0, 2)
+		if value, ok := quotaPercent(snapshot.Windows, "session"); ok {
+			parts = append(parts, fmt.Sprintf("5h %.0f%%", value))
+		}
+		if value, ok := quotaPercent(snapshot.Windows, "weekly"); ok {
+			parts = append(parts, fmt.Sprintf("wk %.0f%%", value))
+		}
+		if len(parts) > 0 {
+			return name + ": " + strings.Join(parts, " · ")
+		}
+		break
+	}
+	return name + ": usage limits unavailable"
+}
+
+func quotaPercent(windows []parser.QuotaWindow, kind string) (float64, bool) {
+	for _, window := range windows {
+		if window.Kind == kind {
+			return window.UsedPercent, true
+		}
+	}
+	return 0, false
 }
 
 func compactTokens(value int64) string {

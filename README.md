@@ -6,11 +6,12 @@ This repository is under active development. The first runnable milestone includ
 
 - Claude usage parsing from `~/.claude/projects/**/*.jsonl`, including response-snapshot deduplication and cache read/write tokens.
 - Codex usage parsing from the allowlisted `~/.codex/sessions/**/*.jsonl` and `~/.codex/archived_sessions/**/*.jsonl` trees, including exact `last_token_usage`, cumulative-counter fallback, and replay suppression.
-- Daily, 7-day, all-time, provider, and model aggregates.
+- Daily, hourly, 7-day, 30-day, all-time, provider, and model aggregates.
+- Live 5-hour and weekly subscription-window usage for Claude Code and Codex, with safe local Codex snapshots as a fallback.
 - A recursive `fsnotify` watcher with periodic fallback scans.
-- `GET /api/status`, `GET /api/stats`, and an embedded responsive dashboard.
+- `GET /api/status`, `GET /api/stats`, and an embedded responsive dashboard with Overview, Consumption, Trends, Models & providers, and Usage limits tabs. Consumption provides separate Claude/Codex ledgers for today, the last 30 days, and all time, including model details, selectable charts, token composition, and activity tables.
 - JSON configuration with cross-platform home-directory expansion.
-- A native system tray menu with live usage status, dashboard/settings shortcuts, manual refresh, and Start/Stop controls.
+- A native system tray menu with token totals, Claude/Codex 5-hour and weekly limits, dashboard/settings shortcuts, manual refresh, and Start/Stop controls.
 
 Active JSONL files are indexed incrementally: unchanged files are not reopened, appended bytes are parsed from the previous cursor, and incomplete final records are carried into the next refresh. Truncated, replaced, and deleted files rebuild or leave the index cleanly.
 
@@ -40,7 +41,13 @@ The first run creates a config file in the operating system's user config direct
   },
   "paths": {
     "claudeLogs": "~/.claude/projects",
+    "claudeCredentials": "~/.claude/.credentials.json",
     "codexLogs": "~/.codex"
+  },
+  "quota": {
+    "claudeOAuth": true,
+    "codexCLI": true,
+    "pollIntervalSeconds": 300
   },
   "refreshIntervalSeconds": 10
 }
@@ -64,9 +71,17 @@ Headless mode requires `server.autoStart` or the `-start` flag because there is 
 
 ## API
 
-`GET /api/status` reports uptime, last refresh time, and whether a scan warning occurred. `GET /api/stats` returns the aggregate dashboard payload. Raw prompts, responses, session IDs, absolute usage-file paths, and credentials are never included in API responses.
+`GET /api/status` reports uptime, last refresh time, and whether a scan warning occurred. `GET /api/stats` returns the aggregate dashboard payload. Raw prompts, responses, session IDs, absolute usage-file paths, access tokens, and credentials are never included in API responses.
 
 Codex discovery deliberately ignores files outside `sessions` and `archived_sessions`. In particular, AgentsUsage does not read `auth.json`, SQLite databases, browser state, or other Codex configuration.
+
+## Usage limits and privacy
+
+Claude Code does not expose subscription limits as a non-interactive CLI command. When `quota.claudeOAuth` is enabled, AgentsUsage reads the existing access token from `paths.claudeCredentials` and sends it only to Anthropic's OAuth usage endpoint. It never refreshes, modifies, or copies the credential into its API payloads. If the credential is missing or expired, Claude limits are shown as unavailable.
+
+When `quota.codexCLI` is enabled, AgentsUsage starts the installed `codex app-server` long enough to request the current account rate limits, then terminates it. If that live query is unavailable, a non-expired rate-limit observation already present in Codex session JSONL may still be displayed and is labeled as last observed.
+
+Both checks can be disabled independently in `config.json`. They run at startup, on manual refresh, and at `quota.pollIntervalSeconds`; the minimum interval is 30 seconds. Token-log parsing remains local, but enabled live limit checks contact the corresponding provider. Because the default server bind is `0.0.0.0`, anyone who can reach port 8787 on the local network can see the aggregate token counts and limit percentages. Set `server.host` to `127.0.0.1` if the dashboard should be available only on this computer.
 
 ## Validate and build
 

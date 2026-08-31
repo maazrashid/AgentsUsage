@@ -20,6 +20,7 @@ type codexState struct {
 	highWater   *codexCounts
 	signatures  map[string]string
 	previousSig string
+	quota       *QuotaSnapshot
 }
 
 func parseCodexFile(ctx context.Context, path string) ([]Event, Diagnostics) {
@@ -77,6 +78,7 @@ func cloneCodexState(original codexState) codexState {
 		highWater := *original.highWater
 		cloned.highWater = &highWater
 	}
+	cloned.quota = copyQuota(original.quota)
 	cloned.signatures = make(map[string]string, len(original.signatures))
 	for source, signature := range original.signatures {
 		cloned.signatures[source] = signature
@@ -97,6 +99,9 @@ func parseCodexTokenCount(entry, payload map[string]any, state *codexState) (Eve
 	timestamp, ok := parseTimestamp(entry["timestamp"])
 	if !ok {
 		return Event{}, false
+	}
+	if snapshot := parseCodexQuota(payload, info, timestamp); snapshot != nil {
+		state.quota = snapshot
 	}
 	signature := countsSignature(current, hasCurrent) + "|" + countsSignature(last, hasLast)
 	source := rateLimitSource(payload, info)
@@ -132,6 +137,60 @@ func parseCodexTokenCount(entry, payload map[string]any, state *codexState) (Eve
 		InputTokens: usage.input, OutputTokens: usage.output, CacheRead: usage.cached,
 		Reasoning: usage.reasoning, CostUSD: cost, CostEstimated: true, PricingMatched: priced,
 	}, true
+}
+
+func parseCodexQuota(payload, info map[string]any, observedAt time.Time) *QuotaSnapshot {
+	var limits map[string]any
+	for _, parent := range []map[string]any{payload, info} {
+		if candidate, ok := parent["rate_limits"].(map[string]any); ok {
+			limits = candidate
+			break
+		}
+	}
+	if limits == nil {
+		return nil
+	}
+	windows := make([]QuotaWindow, 0, 2)
+	for _, label := range []string{"primary", "secondary"} {
+		raw, _ := limits[label].(map[string]any)
+		if raw == nil {
+			continue
+		}
+		used, ok := numericField(raw, "used_percent")
+		if !ok || math.IsNaN(used) || math.IsInf(used, 0) {
+			continue
+		}
+		minutes64, _ := integerField(raw, "window_minutes")
+		minutes := int(minutes64)
+		var resetsAt *time.Time
+		if parsed, ok := parseTimestamp(raw["resets_at"]); ok {
+			resetsAt = &parsed
+		}
+		windows = append(windows, QuotaWindow{
+			Kind: quotaWindowKind(label, minutes), Label: label,
+			UsedPercent: math.Max(0, math.Min(100, used)), WindowMinutes: minutes, ResetsAt: resetsAt,
+		})
+	}
+	if len(windows) == 0 {
+		return nil
+	}
+	limitName, _ := limits["limit_name"].(string)
+	return &QuotaSnapshot{
+		Provider: ProviderCodex, ObservedAt: observedAt, Source: "local-log",
+		Confidence: "last-observed", LimitName: normalizedLabel(limitName), Windows: windows,
+	}
+}
+
+func numericField(value map[string]any, key string) (float64, bool) {
+	switch typed := value[key].(type) {
+	case json.Number:
+		result, err := strconv.ParseFloat(typed.String(), 64)
+		return result, err == nil
+	case float64:
+		return typed, true
+	default:
+		return 0, false
+	}
 }
 
 func decodeObject(line []byte) (map[string]any, bool) {

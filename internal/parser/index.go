@@ -89,6 +89,11 @@ func (i *Indexer) Refresh(ctx context.Context) (Stats, error) {
 		mergeDiagnostics(&diagnostics, cached.diagnostics)
 	}
 	stats := aggregate(events, now())
+	quotaValues := make([]*QuotaSnapshot, 0, len(i.codex))
+	for _, cached := range i.codex {
+		quotaValues = append(quotaValues, cached.state.quota)
+	}
+	stats.Quotas = LiveQuotaSnapshots(quotaValues, now())
 	diagnostics.BytesRead = bytesRead
 	stats.Diagnostics = diagnostics
 	return stats, errors.Join(refreshErrors...)

@@ -75,3 +75,25 @@ func TestParseTimestampRejectsInvalidNumbers(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexParserCapturesFiveHourAndWeeklyLimits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	line := `{"timestamp":"2026-08-29T09:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":20}},"rate_limits":{"limit_id":"codex-main","limit_name":"Codex","primary":{"used_percent":42,"window_minutes":300,"resets_at":1787997600},"secondary":{"used_percent":67,"window_minutes":10080,"resets_at":1788500000}}}}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := codexState{signatures: make(map[string]string)}
+	_, _, state, diagnostics, _, err := parseCodexTail(context.Background(), path, streamCursor{}, state)
+	if err != nil || diagnostics.ParseErrors != 0 {
+		t.Fatalf("parse failed: %v %+v", err, diagnostics)
+	}
+	if state.quota == nil || len(state.quota.Windows) != 2 {
+		t.Fatalf("quota not captured: %+v", state.quota)
+	}
+	if state.quota.Windows[0].Kind != "session" || state.quota.Windows[0].UsedPercent != 42 {
+		t.Fatalf("unexpected session window: %+v", state.quota.Windows[0])
+	}
+	if state.quota.Windows[1].Kind != "weekly" || state.quota.Windows[1].WindowMinutes != 10080 {
+		t.Fatalf("unexpected weekly window: %+v", state.quota.Windows[1])
+	}
+}

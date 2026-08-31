@@ -12,11 +12,19 @@ func TestLoadCreatesDefaultConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Server.Port != 8787 || cfg.Paths.ClaudeLogs == "" || cfg.Paths.CodexLogs == "" {
+	if cfg.Server.Port != 8787 || cfg.Paths.ClaudeLogs == "" || cfg.Paths.CodexLogs == "" || !cfg.Quota.ClaudeOAuth {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("default config was not persisted: %v", err)
+	}
+}
+
+func TestValidateRejectsUnsafeQuotaInterval(t *testing.T) {
+	cfg := Default()
+	cfg.Quota.PollIntervalSeconds = 5
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected invalid quota poll interval to fail validation")
 	}
 }
 

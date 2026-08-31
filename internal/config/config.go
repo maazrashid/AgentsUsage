@@ -17,6 +17,7 @@ const defaultPort = 8787
 type Config struct {
 	Server                 ServerConfig `json:"server"`
 	Paths                  PathsConfig  `json:"paths"`
+	Quota                  QuotaConfig  `json:"quota"`
 	RefreshIntervalSeconds int          `json:"refreshIntervalSeconds"`
 }
 
@@ -27,17 +28,26 @@ type ServerConfig struct {
 }
 
 type PathsConfig struct {
-	ClaudeLogs string `json:"claudeLogs"`
-	CodexLogs  string `json:"codexLogs"`
+	ClaudeLogs        string `json:"claudeLogs"`
+	ClaudeCredentials string `json:"claudeCredentials"`
+	CodexLogs         string `json:"codexLogs"`
+}
+
+type QuotaConfig struct {
+	ClaudeOAuth         bool `json:"claudeOAuth"`
+	CodexCLI            bool `json:"codexCLI"`
+	PollIntervalSeconds int  `json:"pollIntervalSeconds"`
 }
 
 func Default() Config {
 	return Config{
 		Server: ServerConfig{Host: "0.0.0.0", Port: defaultPort, AutoStart: true},
 		Paths: PathsConfig{
-			ClaudeLogs: "~/.claude/projects",
-			CodexLogs:  "~/.codex",
+			ClaudeLogs:        "~/.claude/projects",
+			ClaudeCredentials: "~/.claude/.credentials.json",
+			CodexLogs:         "~/.codex",
 		},
+		Quota:                  QuotaConfig{ClaudeOAuth: true, CodexCLI: true, PollIntervalSeconds: 300},
 		RefreshIntervalSeconds: 10,
 	}
 }
@@ -115,6 +125,12 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Paths.CodexLogs) == "" {
 		return errors.New("paths.codexLogs must not be empty")
 	}
+	if c.Quota.ClaudeOAuth && strings.TrimSpace(c.Paths.ClaudeCredentials) == "" {
+		return errors.New("paths.claudeCredentials must not be empty when quota.claudeOAuth is enabled")
+	}
+	if c.Quota.PollIntervalSeconds < 30 || c.Quota.PollIntervalSeconds > 3600 {
+		return errors.New("quota.pollIntervalSeconds must be between 30 and 3600")
+	}
 	return nil
 }
 
@@ -127,6 +143,12 @@ func ResolvePaths(cfg Config) (Config, error) {
 	cfg.Paths.CodexLogs, err = ExpandPath(cfg.Paths.CodexLogs)
 	if err != nil {
 		return Config{}, fmt.Errorf("resolve Codex logs path: %w", err)
+	}
+	if strings.TrimSpace(cfg.Paths.ClaudeCredentials) != "" {
+		cfg.Paths.ClaudeCredentials, err = ExpandPath(cfg.Paths.ClaudeCredentials)
+		if err != nil {
+			return Config{}, fmt.Errorf("resolve Claude credentials path: %w", err)
+		}
 	}
 	return cfg, nil
 }

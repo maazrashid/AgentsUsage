@@ -45,6 +45,15 @@ func TestScanAggregatesBothProvidersAndAllowlistedCodexRoots(t *testing.T) {
 	if len(stats.Providers) != 2 {
 		t.Fatalf("providers = %+v", stats.Providers)
 	}
+	if len(stats.Consumption) != 2 {
+		t.Fatalf("consumption providers = %+v", stats.Consumption)
+	}
+	if stats.Consumption[0].Provider != ProviderClaude || stats.Consumption[0].Today.Totals.UsageRecords != 1 || len(stats.Consumption[0].Today.Models) != 1 {
+		t.Fatalf("unexpected Claude consumption: %+v", stats.Consumption[0])
+	}
+	if stats.Consumption[1].Provider != ProviderCodex || stats.Consumption[1].Last30Days.Totals.ProcessedTokens != 120 || len(stats.Consumption[1].AllTime.Timeline) != 1 {
+		t.Fatalf("unexpected Codex consumption: %+v", stats.Consumption[1])
+	}
 }
 
 func TestCodexRootsRejectEmptyPath(t *testing.T) {

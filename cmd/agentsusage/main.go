@@ -12,6 +12,7 @@ import (
 
 	"github.com/maazrashid/AgentsUsage/internal/config"
 	"github.com/maazrashid/AgentsUsage/internal/parser"
+	"github.com/maazrashid/AgentsUsage/internal/quota"
 	"github.com/maazrashid/AgentsUsage/internal/service"
 	trayui "github.com/maazrashid/AgentsUsage/internal/tray"
 )
@@ -48,14 +49,27 @@ func run() error {
 		ClaudeRoot: cfg.Paths.ClaudeLogs,
 		CodexRoot:  cfg.Paths.CodexLogs,
 	}, time.Duration(cfg.RefreshIntervalSeconds)*time.Second)
+	var claudeQuota quota.Fetcher
+	if cfg.Quota.ClaudeOAuth {
+		claudeQuota = quota.NewClaudeClient(cfg.Paths.ClaudeCredentials)
+	}
+	var codexQuota quota.Fetcher
+	if cfg.Quota.CodexCLI {
+		codexQuota = quota.NewCodexClient()
+	}
+	usage := quota.NewTracker(
+		monitor, claudeQuota, codexQuota,
+		time.Duration(cfg.Quota.PollIntervalSeconds)*time.Second,
+	)
 	go func() {
 		if err := monitor.Run(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("usage monitor stopped: %v", err)
 			stop()
 		}
 	}()
+	go usage.Run(ctx)
 
-	controller := service.NewController(cfg.Server.Address(), monitor)
+	controller := service.NewController(cfg.Server.Address(), usage)
 	defer func() {
 		if err := controller.StopWithTimeout(); err != nil {
 			log.Printf("dashboard server shutdown: %v", err)
@@ -85,5 +99,5 @@ func run() error {
 		DashboardURL: cfg.Server.DashboardURL(),
 		ConfigPath:   resolvedConfigPath,
 		Quit:         stop,
-	}, controller, monitor)
+	}, controller, usage)
 }

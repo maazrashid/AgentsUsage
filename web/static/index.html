@@ -12,66 +12,142 @@
     <header class="topbar">
       <div class="brand">
         <div class="mark" aria-hidden="true"><span></span><span></span><span></span></div>
-        <div>
-          <p class="eyebrow">LOCAL TELEMETRY</p>
-          <h1>AgentsUsage</h1>
-        </div>
+        <div><p class="eyebrow">LOCAL TELEMETRY</p><h1>AgentsUsage</h1></div>
       </div>
       <div class="status"><span class="status-dot" id="status-dot"></span><span id="status-label">Connecting</span></div>
     </header>
 
+    <nav class="tabs" role="tablist" aria-label="Dashboard sections">
+      <button class="tab active" id="tab-overview" role="tab" aria-selected="true" aria-controls="overview" data-tab="overview">Overview</button>
+      <button class="tab" id="tab-consumption" role="tab" aria-selected="false" aria-controls="consumption" data-tab="consumption" tabindex="-1">Consumption</button>
+      <button class="tab" id="tab-trends" role="tab" aria-selected="false" aria-controls="trends" data-tab="trends" tabindex="-1">Trends</button>
+      <button class="tab" id="tab-breakdown" role="tab" aria-selected="false" aria-controls="breakdown" data-tab="breakdown" tabindex="-1">Models &amp; providers</button>
+      <button class="tab" id="tab-limits" role="tab" aria-selected="false" aria-controls="limits" data-tab="limits" tabindex="-1">Usage limits</button>
+    </nav>
+
     <main>
-      <section class="hero">
-        <div>
-          <p class="eyebrow">TODAY</p>
-          <p class="hero-value" id="today-tokens">—</p>
-          <p class="hero-caption">processed tokens across Claude and Codex</p>
-        </div>
-        <div class="cost-block">
-          <p class="eyebrow">API-EQUIVALENT ESTIMATE</p>
-          <p class="cost" id="today-cost">—</p>
-          <p class="coverage" id="price-coverage">Pricing coverage —</p>
-        </div>
-      </section>
-
-      <section class="metric-grid" aria-label="Usage overview">
-        <article class="metric-card">
-          <p>Input</p><strong id="input-tokens">—</strong><span>today</span>
-        </article>
-        <article class="metric-card">
-          <p>Output</p><strong id="output-tokens">—</strong><span>today</span>
-        </article>
-        <article class="metric-card">
-          <p>Cache read</p><strong id="cache-tokens">—</strong><span id="cache-rate">— of input-side tokens</span>
-        </article>
-        <article class="metric-card accent">
-          <p>Last 7 days</p><strong id="week-tokens">—</strong><span id="week-cost">— estimated</span>
-        </article>
-      </section>
-
-      <section class="panel chart-panel">
-        <div class="panel-title">
-          <div><p class="eyebrow">30-DAY WINDOW</p><h2>Daily activity</h2></div>
-          <p class="muted" id="last-refresh">Waiting for first scan</p>
-        </div>
-        <div class="chart" id="daily-chart" aria-label="Daily processed token chart"></div>
-      </section>
-
-      <div class="split">
-        <section class="panel">
-          <div class="panel-title"><div><p class="eyebrow">PROVIDERS</p><h2>Source mix</h2></div></div>
-          <div id="providers" class="rows"><p class="empty">No usage found yet.</p></div>
+      <section class="tab-panel active" id="overview" role="tabpanel" aria-labelledby="tab-overview">
+        <section class="hero">
+          <div><p class="eyebrow">TODAY</p><p class="hero-value" id="today-tokens">—</p><p class="hero-caption">processed tokens across Claude and Codex</p></div>
+          <div class="cost-block"><p class="eyebrow">API-EQUIVALENT ESTIMATE</p><p class="cost" id="today-cost">—</p><p class="coverage" id="price-coverage">Pricing coverage —</p></div>
         </section>
-        <section class="panel">
-          <div class="panel-title"><div><p class="eyebrow">MODELS</p><h2>Top models</h2></div></div>
-          <div id="models" class="rows"><p class="empty">No usage found yet.</p></div>
-        </section>
-      </div>
 
-      <footer>
-        <span>All data stays on this machine.</span>
-        <span id="diagnostics">0 files scanned</span>
-      </footer>
+        <section class="quota-strip" id="quota-overview" aria-label="Current usage limits"></section>
+
+        <section class="metric-grid" aria-label="Usage overview">
+          <article class="metric-card"><p>Input</p><strong id="input-tokens">—</strong><span>today</span></article>
+          <article class="metric-card"><p>Output</p><strong id="output-tokens">—</strong><span>today</span></article>
+          <article class="metric-card"><p>Cache read</p><strong id="cache-tokens">—</strong><span id="cache-rate">— of input-side tokens</span></article>
+          <article class="metric-card accent"><p>Last 7 days</p><strong id="week-tokens">—</strong><span id="week-cost">— estimated</span></article>
+        </section>
+
+        <section class="panel chart-panel">
+          <div class="panel-title"><div><p class="eyebrow">30-DAY WINDOW</p><h2>Daily activity</h2></div><p class="muted" id="last-refresh">Waiting for first scan</p></div>
+          <div class="chart-legend"><span><i class="legend-swatch token"></i>Processed tokens</span><span class="chart-hint">Hover or focus a bar for details</span></div>
+          <div class="chart" id="daily-chart" aria-label="Daily processed token chart"></div>
+        </section>
+
+        <div class="split">
+          <section class="panel"><div class="panel-title"><div><p class="eyebrow">PROVIDERS</p><h2>Source mix</h2></div></div><div id="providers" class="rows"></div></section>
+          <section class="panel"><div class="panel-title"><div><p class="eyebrow">MODELS</p><h2>Top models</h2></div></div><div id="models" class="rows"></div></section>
+        </div>
+      </section>
+
+      <section class="tab-panel consumption-page" id="consumption" role="tabpanel" aria-labelledby="tab-consumption" hidden>
+        <div class="section-heading consumption-heading">
+          <div><p class="eyebrow">PROVIDER LEDGER</p><h2>Consumption details</h2></div>
+          <p>Inspect exact token categories, models, estimates, and activity for each agent.</p>
+        </div>
+
+        <div class="consumption-toolbar" aria-label="Consumption filters">
+          <div class="segmented provider-segment" aria-label="Provider">
+            <button class="segment active" type="button" data-consumption-provider="claude" aria-pressed="true"><i class="provider-dot claude"></i>Claude</button>
+            <button class="segment" type="button" data-consumption-provider="codex" aria-pressed="false"><i class="provider-dot codex"></i>Codex</button>
+          </div>
+          <div class="segmented period-segment" aria-label="Period">
+            <button class="segment active" type="button" data-consumption-period="today" aria-pressed="true">Today</button>
+            <button class="segment" type="button" data-consumption-period="last30Days" aria-pressed="false">Last 30 days</button>
+            <button class="segment" type="button" data-consumption-period="allTime" aria-pressed="false">All time</button>
+          </div>
+        </div>
+
+        <section class="consumption-kpis" id="consumption-kpis" aria-label="Provider consumption summary"></section>
+
+        <section class="panel consumption-composition-panel">
+          <div class="panel-title"><div><p class="eyebrow" id="consumption-composition-period">TODAY</p><h2>Token composition</h2></div><p class="muted" id="consumption-reasoning-note">Reasoning is included in output</p></div>
+          <div class="composition-bar" id="consumption-composition-bar" aria-label="Token composition"></div>
+          <div class="composition-legend" id="consumption-composition-legend"></div>
+        </section>
+
+        <section>
+          <div class="section-heading compact-heading"><div><p class="eyebrow">MODEL USAGE</p><h2>Models</h2></div><p>Expand a model for its complete token ledger.</p></div>
+          <div class="model-accordions" id="consumption-models"></div>
+        </section>
+
+        <section class="panel chart-panel consumption-chart-panel">
+          <div class="panel-title"><div><p class="eyebrow" id="consumption-timeline-period">TODAY BY HOUR</p><h2 id="consumption-timeline-title">Processed tokens</h2></div><p class="muted">Hover or focus a bar for details</p></div>
+          <div class="metric-switch" id="consumption-metrics" aria-label="Chart metric">
+            <button class="metric-option active" type="button" data-consumption-metric="cost" aria-pressed="true">Estimated cost</button>
+            <button class="metric-option" type="button" data-consumption-metric="processed" aria-pressed="false">Processed</button>
+            <button class="metric-option" type="button" data-consumption-metric="fresh" aria-pressed="false">Fresh input</button>
+            <button class="metric-option" type="button" data-consumption-metric="cache" aria-pressed="false">Cache read</button>
+            <button class="metric-option" type="button" data-consumption-metric="output" aria-pressed="false">Output</button>
+            <button class="metric-option" type="button" data-consumption-metric="reasoning" aria-pressed="false">Reasoning</button>
+            <button class="metric-option" type="button" data-consumption-metric="records" aria-pressed="false">Usage records</button>
+          </div>
+          <div class="chart-legend" id="consumption-chart-legend"></div>
+          <div class="chart consumption-chart" id="consumption-chart" aria-label="Provider consumption timeline"></div>
+        </section>
+
+        <section class="panel chart-panel consumption-stack-panel">
+          <div class="panel-title"><div><p class="eyebrow">TIMELINE COMPOSITION</p><h2>Input, cache, and output</h2></div><p class="muted">Reasoning remains a subset of output</p></div>
+          <div class="composition-legend compact" id="consumption-stack-legend"></div>
+          <div class="chart consumption-chart stacked-chart" id="consumption-stack-chart" aria-label="Stacked token composition timeline"></div>
+        </section>
+
+        <section class="panel table-panel consumption-table-panel">
+          <div class="panel-title"><div><p class="eyebrow">ACTIVITY LEDGER</p><h2 id="consumption-table-title">Hourly details</h2></div><p class="muted">Newest first</p></div>
+          <div class="table-scroll"><table><thead><tr><th id="consumption-time-heading">Hour</th><th>Estimate</th><th>Processed</th><th>Fresh input</th><th>Input</th><th>Cache read</th><th>Cache hit</th><th>Output</th><th>Reasoning</th><th>Records</th></tr></thead><tbody id="consumption-table"></tbody></table></div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="trends" role="tabpanel" aria-labelledby="tab-trends" hidden>
+        <div class="section-heading"><div><p class="eyebrow">USAGE OVER TIME</p><h2>Trends</h2></div><p>Compare recent volume, cost, and today’s hourly rhythm.</p></div>
+        <section class="metric-grid trend-metrics">
+          <article class="metric-card"><p>7-day tokens</p><strong id="trend-week-tokens">—</strong><span id="trend-week-average">— daily average</span></article>
+          <article class="metric-card"><p>All-time tokens</p><strong id="all-time-tokens">—</strong><span>indexed locally</span></article>
+          <article class="metric-card"><p>7-day estimate</p><strong id="trend-week-cost">—</strong><span>API-equivalent</span></article>
+          <article class="metric-card accent"><p>Reasoning output</p><strong id="reasoning-tokens">—</strong><span>all time · included in output</span></article>
+        </section>
+        <div class="split">
+          <section class="panel chart-panel"><div class="panel-title"><div><p class="eyebrow">30 DAYS</p><h2>Token volume</h2></div></div><div class="chart-legend"><span><i class="legend-swatch token"></i>Processed tokens</span><span class="chart-hint">Daily</span></div><div class="chart compact-chart" id="trend-token-chart" aria-label="Daily processed token trend"></div></section>
+          <section class="panel chart-panel"><div class="panel-title"><div><p class="eyebrow">30 DAYS</p><h2>Estimated cost</h2></div></div><div class="chart-legend"><span><i class="legend-swatch cost"></i>API-equivalent estimate</span><span class="chart-hint">Daily · USD</span></div><div class="chart compact-chart cost-chart" id="cost-chart" aria-label="Daily estimated cost trend"></div></section>
+        </div>
+        <section class="panel chart-panel"><div class="panel-title"><div><p class="eyebrow">TODAY BY HOUR</p><h2>Activity rhythm</h2></div><p class="muted">Local time</p></div><div class="chart-legend"><span><i class="legend-swatch token"></i>Processed tokens</span><span class="chart-hint">Hourly</span></div><div class="chart hourly-chart" id="hourly-chart" aria-label="Hourly processed token chart"></div></section>
+      </section>
+
+      <section class="tab-panel" id="breakdown" role="tabpanel" aria-labelledby="tab-breakdown" hidden>
+        <div class="section-heading"><div><p class="eyebrow">ATTRIBUTION</p><h2>Models &amp; providers</h2></div><p>Exact token attribution with clearly separated cost estimates.</p></div>
+        <div class="split composition-grid">
+          <section class="panel token-composition"><div><p class="eyebrow">ALL TIME</p><h2>Token composition</h2><p class="muted">Cache and reasoning are subsets, not added twice.</p></div><div class="donut" id="token-donut"><span id="donut-total">—</span></div><div class="legend" id="token-legend"></div></section>
+          <section class="panel"><div class="panel-title"><div><p class="eyebrow">PROVIDERS</p><h2>Claude vs Codex</h2></div></div><div id="provider-detail" class="rows"></div></section>
+        </div>
+        <section class="panel table-panel">
+          <div class="panel-title"><div><p class="eyebrow">MODEL LEDGER</p><h2>Usage by model</h2></div><p class="muted">Sorted by processed tokens</p></div>
+          <div class="table-scroll"><table><thead><tr><th>Model</th><th>Processed</th><th>Input</th><th>Output</th><th>Cache read</th><th>Estimate</th></tr></thead><tbody id="model-table"></tbody></table></div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="limits" role="tabpanel" aria-labelledby="tab-limits" hidden>
+        <div class="section-heading"><div><p class="eyebrow">SUBSCRIPTION WINDOWS</p><h2>Usage limits</h2></div><p>Live when the provider exposes it; otherwise the newest safe local observation.</p></div>
+        <section class="limits-grid" id="quota-detail"></section>
+        <section class="panel limits-note">
+          <p><strong>How this works.</strong> Claude is read from Anthropic’s OAuth usage endpoint using Claude Code’s existing token. AgentsUsage never refreshes or writes that credential. Codex is queried through the installed CLI’s account protocol, with session-log snapshots as a fallback.</p>
+          <p>Limit percentages are subscription-window observations, not token totals or API billing. Estimates elsewhere in the dashboard remain API-equivalent estimates.</p>
+        </section>
+      </section>
+
+      <footer><span>Usage logs stay local. Enabled limit checks contact each provider.</span><span id="diagnostics">0 files scanned</span></footer>
     </main>
   </div>
   <script src="app.js" defer></script>
